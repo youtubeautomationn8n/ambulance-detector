@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Green Corridor AI — Ambulance Lane Clearance · Demo Prototype</title>
+<style>
+  :root{
+    --bg:#0b0f16; --panel:#121826; --line:#232c42; --ink:#e8edf7; --muted:#8b96ad;
+    --red:#ff3b47; --amber:#ffb020; --green:#2fe07a; --blue:#3fa9ff;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  body{background:var(--bg); color:var(--ink); font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; min-height:100vh}
+  header{padding:18px 22px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:14px; flex-wrap:wrap}
+  header .siren{font-size:34px; animation:blink 1s infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
+  header h1{font-size:20px; letter-spacing:.3px}
+  header p{color:var(--muted); font-size:13px; width:100%}
+  .proto-tag{font-size:11px; font-weight:800; letter-spacing:1.5px; color:#0b0f16; background:var(--amber); padding:4px 10px; border-radius:20px}
+  main{display:grid; grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr); gap:18px; padding:18px 22px; max-width:1280px; margin:0 auto}
+  @media(max-width:960px){ main{grid-template-columns:1fr} }
+  .stage{background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:14px}
+  .stage .cam-label{display:flex; justify-content:space-between; color:var(--muted); font-size:12px; font-weight:700; letter-spacing:1px; margin-bottom:10px}
+  .cam-label .rec{color:var(--red)}
+  canvas#road{width:100%; height:auto; border-radius:10px; background:#111; display:block}
+  .legend{display:flex; gap:16px; flex-wrap:wrap; margin-top:10px; font-size:12.5px; color:var(--muted)}
+  .legend b{color:var(--ink)}
+  .dot{display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; vertical-align:baseline}
+  .panel{display:flex; flex-direction:column; gap:14px}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:14px}
+  .card h2{font-size:13px; letter-spacing:1.5px; color:var(--muted); margin-bottom:10px; font-weight:800}
+  /* LED board */
+  .led{background:#050505; border:3px solid #2a2f3a; border-radius:12px; padding:18px 12px; text-align:center;
+       font-family:"Courier New",monospace; font-weight:900; font-size:clamp(17px,2.4vw,24px); letter-spacing:2px;
+       min-height:118px; display:flex; align-items:center; justify-content:center; line-height:1.5;
+       background-image:repeating-linear-gradient(0deg, rgba(255,255,255,.025) 0 2px, transparent 2px 4px);}
+  .led.idle{color:var(--green); text-shadow:0 0 12px rgba(47,224,122,.7)}
+  .led.warn{color:var(--amber); text-shadow:0 0 12px rgba(255,176,32,.8); animation:ledflash .7s infinite}
+  .led.alert{color:var(--red); text-shadow:0 0 14px rgba(255,59,71,.9); animation:ledflash .45s infinite}
+  .led.clear{color:var(--blue); text-shadow:0 0 12px rgba(63,169,255,.8)}
+  @keyframes ledflash{0%,100%{opacity:1}50%{opacity:.55}}
+  .led small{display:block; font-size:11px; letter-spacing:3px; opacity:.75; margin-top:6px}
+  /* signals */
+  .sig{display:flex; align-items:center; gap:10px; padding:9px 4px; border-bottom:1px dashed var(--line); font-size:14px}
+  .sig:last-child{border-bottom:none}
+  .sig .lamp{width:12px; height:12px; border-radius:50%; background:#3a4358; flex:none}
+  .sig.on .lamp{background:var(--green); box-shadow:0 0 10px var(--green)}
+  .sig .name{flex:1}
+  .sig .name small{display:block; color:var(--muted); font-size:11.5px}
+  .sig .conf{width:110px; height:8px; background:#20283c; border-radius:6px; overflow:hidden; flex:none}
+  .sig .conf i{display:block; height:100%; width:0%; background:linear-gradient(90deg,var(--amber),var(--green)); transition:width .25s}
+  canvas#spectrum{width:100%; height:54px; background:#0a0e15; border-radius:8px; margin-top:8px}
+  /* lanes */
+  .lane-row{display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:10px; font-size:14px; margin-bottom:6px; background:#0e1420}
+  .lane-row.chosen{background:rgba(47,224,122,.12); border:1px solid var(--green)}
+  .lane-row .ln{font-weight:800; width:58px}
+  .lane-row .bar{flex:1; height:10px; background:#20283c; border-radius:6px; overflow:hidden}
+  .lane-row .bar i{display:block; height:100%; background:var(--blue)}
+  .lane-row .meta{font-size:12px; color:var(--muted); width:118px; text-align:right}
+  /* log */
+  #eventLog{height:170px; overflow-y:auto; font-size:12.5px; font-family:"Courier New",monospace; display:flex; flex-direction:column; gap:5px}
+  #eventLog .t{color:var(--muted)}
+  #eventLog .good{color:var(--green)} #eventLog .bad{color:var(--red)} #eventLog .warn{color:var(--amber)}
+  /* controls */
+  .controls{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+  .btn{border:none; border-radius:12px; padding:13px 10px; font-size:14px; font-weight:800; cursor:pointer; color:#fff; font-family:inherit}
+  .btn:active{transform:scale(.97)}
+  .btn.red{background:linear-gradient(135deg,#e02633,#a3121d)}
+  .btn.dark{background:#232c42}
+  .btn.green{background:linear-gradient(135deg,#1fae5c,#147a3e)}
+  .btn:disabled{opacity:.4; cursor:not-allowed}
+  .slider-row{grid-column:1/-1; font-size:13px; color:var(--muted)}
+  .slider-row input{width:100%; accent-color:var(--red); margin-top:6px}
+  footer{max-width:1280px; margin:0 auto; padding:0 22px 26px; color:var(--muted); font-size:12.5px; line-height:1.7}
+  footer b{color:var(--ink)}
+  details{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-top:12px; font-size:13.5px}
+  details summary{cursor:pointer; font-weight:800}
+</style>
+</head>
+<body>
+<header>
+  <span class="siren">🚨</span>
+  <h1>Green Corridor AI</h1>
+  <span class="proto-tag">DEMO PROTOTYPE</span>
+  <p>Highway camera watches traffic → AI detects the ambulance → picks the emptiest lane → LED board orders that lane cleared. Detection algorithms are <b style="color:#e8edf7">real</b> — run the simulation, or switch to <b style="color:#e8edf7">Live Camera</b> and point your phone at real flashing lights.</p>
+</header>
+<main>
+  <section class="stage">
+    <div class="cam-label"><span>🎥 CAM 04 — NH-48 · KM 212 · LIVE</span><span class="rec">● REC</span></div>
+    <canvas id="road" width="640" height="800"></canvas>
+    <video id="camVideo" playsinline muted style="display:none"></video>
+    <div class="legend">
+      <span><span class="dot" style="background:#8b96ad"></span><b>Traffic</b> — regular vehicles</span>
+      <span><span class="dot" style="background:#ff3b47"></span><b>Ambulance</b> — strobing beacon</span>
+      <span><span class="dot" style="background:#2fe07a"></span><b>Green overlay</b> — chosen corridor lane</span>
+    </div>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:13px;color:#8b96ad">
+      <input type="checkbox" id="showGrid" checked> Show flash-detection grid (the cells the AI is watching)
+    </label>
+  </section>
+
+  <aside class="panel">
+    <div class="card">
+      <h2>🪧 ROADSIDE LED BOARD</h2>
+      <div class="led idle" id="ledBoard">TRAFFIC NORMAL<small>VMS-04 · NH-48</small></div>
+    </div>
+
+    <div class="card">
+      <h2>📡 DETECTION SIGNALS</h2>
+      <div class="sig" id="sigFlash"><span class="lamp"></span><span class="name">Flash pattern<small>red/blue strobe @ ~5Hz — pixel analysis</small></span><span class="conf"><i id="confFlash"></i></span></div>
+      <div class="sig" id="sigSiren"><span class="lamp"></span><span class="name">Siren audio<small>wail sweep 700→1500 Hz — mic / test tone</small></span><span class="conf"><i id="confSiren"></i></span></div>
+      <div class="sig" id="sigFusion"><span class="lamp"></span><span class="name">Fusion verdict<small>siren = early warning · flash = confirmed</small></span><span class="conf"><i id="confFusion"></i></span></div>
+      <canvas id="spectrum" width="300" height="54"></canvas>
+    </div>
+
+    <div class="card">
+      <h2>🛣️ LANE ANALYSIS</h2>
+      <div id="laneRows"></div>
+    </div>
+
+    <div class="card">
+      <h2>📋 EVENT LOG</h2>
+      <div id="eventLog"></div>
+    </div>
+
+    <div class="card">
+      <h2>🎛️ CONTROLS</h2>
+      <div class="controls">
+        <button class="btn dark" id="btnMode" style="grid-column:1/-1">🎥 Switch to Live Camera</button>
+        <button class="btn red" id="btnAmb">🚨 Send Ambulance</button>
+        <button class="btn dark" id="btnMic">🎤 Mic: OFF</button>
+        <button class="btn dark" id="btnSiren">🔊 Test Siren</button>
+        <button class="btn green" id="btnReset">↺ Reset Sim</button>
+        <div class="slider-row">Traffic density
+          <input type="range" id="density" min="1" max="10" value="5">
+        </div>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<footer>
+  <details>
+    <summary>How the detection actually works (the real tech)</summary>
+    <p style="margin-top:10px"><b>Flash-pattern detection (no ML needed):</b> each video frame is downscaled and split into a grid. Every cell tracks its red-minus-blue value ~10×/sec. A strobing beacon makes that value oscillate at ~5 Hz (red flash → positive spike, blue flash → negative spike). Cells showing 8+ zero-crossings in 3 seconds <i>with both colors bright</i> = beacon. Steady red brake lights never oscillate → no false alarm. Toggle the grid checkbox to watch it work.</p>
+    <p style="margin-top:8px"><b>Siren detection:</b> the mic feed runs through an FFT (frequency analysis). A wail siren sweeps 700→1500→700 Hz repeatedly — the detector watches the loudest frequency in that band and looks for the up-down-up sweep signature. It hears around corners before the camera sees anything.</p>
+    <p style="margin-top:8px"><b>Lane choice:</b> vehicles per lane are counted ahead of the ambulance; score = vehicles + 0.4 × (lanes away from ambulance). Lowest score wins — fewest people disturbed. In a real deployment the counts come from an object-detection model; here the sim provides them.</p>
+  </details>
+  <p style="margin-top:12px">Built as a hackathon-grade prototype · 100% in-browser, zero servers, zero cost.</p>
+</footer>
+
+<script>
+"use strict";
+/* ============================================================
+   GREEN CORRIDOR AI — demo prototype
+   Simulates a highway camera feed; runs REAL detection algorithms
+   (flash-pattern pixel analysis + siren FFT) on that feed.
+   ============================================================ */
+const cv = document.getElementById('road');
+const ctx = cv.getContext('2d');
+const W = cv.width, H = cv.height;
+const LANES = 3, LANE_W = W / LANES;
+const laneX = l => l * LANE_W + LANE_W / 2;
+
+/* ---------------- state ---------------- */
+let cars = [], ambulance = null, corridor = null; // corridor: {lane, untilPass}
+let density = 5, spawnT = 0, simT = 0;
+let showGrid = true;
+const CAR_COLORS = ['#5b6b8c','#7c8aa5','#3e4a63','#8c6b5b','#4f6b5b','#6b5b7c'];
+
+function log(msg, cls){
+  const el = document.getElementById('eventLog');
+  const d = document.createElement('div');
+  const t = new Date();
+  const ts = String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0')+':'+String(t.getSeconds()).padStart(2,'0');
+  d.innerHTML = '<span class="t">['+ts+']</span> <span class="'+(cls||'')+'">'+msg+'</span>';
+  el.prepend(d);
+  while(el.children.length > 40) el.lastChild.remove();
+}
+
+function spawnCar(){
+  const lane = (Math.random()*LANES)|0;
+  // keep a gap at spawn
+  for(const c of cars){ if(c.lane===lane && c.y > H-160) return; }
+  cars.push({
+    lane, y: H + 70, xOff: 0, pull: 0,
+    speed: 120 + Math.random()*90,
+    color: CAR_COLORS[(Math.random()*CAR_COLORS.length)|0],
+    w: 52, h: 92, isAmb: false
+  });
+}
+
+function sendAmbulance(){
+  if(mode==='live'){ log('Live mode: the AI is watching YOUR camera — point it at real flashing lights.', 'warn'); return; }
+  if(ambulance){ log('Ambulance already en route.', 'warn'); return; }
+  const lane = (Math.random()*LANES)|0;
+  ambulance = { lane, y: H + 150, xOff: 0, speed: 265, w: 58, h: 104, isAmb: true };
+  log('🚨 Ambulance dispatched on lane '+(lane+1)+' (off-camera).', 'bad');
+  // Siren starts immediately — heard BEFORE seen (early warning demo)
+  playSiren(12);
+  log('🔊 Siren audible — watch the Siren signal.', 'warn');
+  setLED('warn', '⚠ SIREN HEARD<br>WATCH FOR AMBULANCE');
+}
+
+function resetSim(){
+  cars = []; ambulance = null; corridor = null; spawnT = 0;
+  flashCells.forEach(c=>{ c.hist.fill(0); c.maxR=0; c.maxB=0; c.active=false; });
+  sirenHist.fill(0); fusionState = 'idle';
+  setLED('idle', 'TRAFFIC NORMAL');
+  document.getElementById('eventLog').innerHTML = '';
+  log('Sim reset. Camera live.', 'good');
+}
+
+/* ---------------- rendering ---------------- */
+function drawRoad(){
+  // asphalt
+  ctx.fillStyle = '#161616'; ctx.fillRect(0,0,W,H);
+  // subtle texture
+  ctx.fillStyle = 'rgba(255,255,255,0.02)';
+  for(let i=0;i<40;i++){ ctx.fillRect(Math.random()*W, Math.random()*H, 2, 2); }
+  // lane dividers
+  ctx.strokeStyle = '#e8e8e8'; ctx.lineWidth = 5; ctx.setLineDash([34,26]);
+  for(let l=1;l<LANES;l++){
+    ctx.beginPath(); ctx.moveTo(l*LANE_W, 0); ctx.lineTo(l*LANE_W, H); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  // edge lines
+  ctx.strokeStyle = '#ffb020'; ctx.lineWidth = 6;
+  ctx.beginPath(); ctx.moveTo(8,0); ctx.lineTo(8,H); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(W-8,0); ctx.lineTo(W-8,H); ctx.stroke();
+  // corridor highlight
+  if(corridor){
+    ctx.fillStyle = 'rgba(47,224,122,0.13)';
+    ctx.fillRect(corridor.lane*LANE_W, 0, LANE_W, H);
+    ctx.strokeStyle = '#2fe07a'; ctx.lineWidth = 3; ctx.setLineDash([16,12]);
+    ctx.strokeRect(corridor.lane*LANE_W+3, 3, LANE_W-6, H-6);
+    ctx.setLineDash([]);
+  }
+}
+
+function drawCar(c){
+  const x = laneX(c.lane) + c.xOff, y = c.y;
+  ctx.save();
+  ctx.translate(x, y);
+  // shadow
+  ctx.fillStyle = 'rgba(0,0,0,.45)';
+  roundRect(-c.w/2+3, -c.h/2+5, c.w, c.h, 12); ctx.fill();
+  // body
+  ctx.fillStyle = c.isAmb ? '#f2f4f8' : c.color;
+  roundRect(-c.w/2, -c.h/2, c.w, c.h, 12); ctx.fill();
+  // windshield + roof
+  ctx.fillStyle = c.isAmb ? '#cfe3f7' : 'rgba(20,26,36,.85)';
+  roundRect(-c.w/2+8, -c.h/2+14, c.w-16, 22, 6); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,.25)';
+  roundRect(-c.w/2+8, c.h/2-34, c.w-16, 20, 6); ctx.fill();
+  if(c.isAmb){
+    // red stripe
+    ctx.fillStyle = '#d90429'; ctx.fillRect(-c.w/2, -8, c.w, 16);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillStyle = '#d90429'; ctx.fillText('AMBULANCE', 0, -18);
+    // lightbar
+    const phase = (simT*5)%1 < 0.5; // 5 Hz strobe
+    ctx.fillStyle = phase ? '#ff3b47' : '#3fa9ff';
+    roundRect(-20, -c.h/2-6, 40, 12, 4); ctx.fill();
+    // glow (this is what the flash detector sees)
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createRadialGradient(0,0,4, 0,0,95);
+    const col = phase ? '255,59,71' : '63,169,255';
+    g.addColorStop(0, 'rgba('+col+',0.85)');
+    g.addColorStop(1, 'rgba('+col+',0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(0,0,95,0,7); ctx.fill();
+    ctx.restore();
+  } else {
+    // brake lights (steady red — must NOT trigger flash detector)
+    ctx.fillStyle = '#c1121f';
+    ctx.fillRect(-c.w/2+6, c.h/2-10, 12, 6);
+    ctx.fillRect(c.w/2-18, c.h/2-10, 12, 6);
+  }
+  ctx.restore();
+}
+
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+}
+
+function drawFlashGrid(){
+  if(!showGrid) return;
+  const cw = AC.w/AC.gx, ch = AC.h/AC.gy;
+  const sx = W/AC.w, sy = H/AC.h;
+  for(let gy=0; gy<AC.gy; gy++){
+    for(let gx=0; gx<AC.gx; gx++){
+      const c = flashCells[gy*AC.gx+gx];
+      if(c.active){
+        ctx.fillStyle = 'rgba(255,59,71,0.30)';
+        ctx.fillRect(gx*cw*sx, gy*ch*sy, cw*sx, ch*sy);
+      }
+    }
+  }
+  ctx.strokeStyle = 'rgba(139,150,173,0.25)'; ctx.lineWidth = 1;
+  for(let gx=0; gx<=AC.gx; gx++){ ctx.beginPath(); ctx.moveTo(gx*cw*sx,0); ctx.lineTo(gx*cw*sx,H); ctx.stroke(); }
+  for(let gy=0; gy<=AC.gy; gy++){ ctx.beginPath(); ctx.moveTo(0,gy*ch*sy); ctx.lineTo(W,gy*ch*sy); ctx.stroke(); }
+}
+
+/* ---------------- sim update ---------------- */
+function update(dt){
+  simT += dt;
+  // spawn traffic
+  spawnT -= dt;
+  const interval = 1.35 - density*0.115; // density 1..10 → 1.23s..0.2s
+  if(spawnT <= 0){ spawnCar(); spawnT = interval*(0.5+Math.random()); }
+  // move cars
+  for(const c of cars){
+    c.y -= c.speed*dt;
+    c.xOff += (c.pull - c.xOff) * Math.min(1, dt*3);
+  }
+  cars = cars.filter(c => c.y > -140);
+  // ambulance
+  if(ambulance){
+    ambulance.y -= ambulance.speed*dt;
+    if(ambulance.y < -160){
+      log('✅ Ambulance exited frame — corridor clear.', 'good');
+      setLED('clear', '✓ CORRIDOR CLEAR<br>TRAFFIC RESUMING');
+      setTimeout(()=>{ if(!ambulance) setLED('idle','TRAFFIC NORMAL'); }, 3500);
+      ambulance = null; corridor = null;
+      cars.forEach(c=> c.pull = 0);
+      fusionState = 'idle';
+    }
+  }
+  // corridor pull-aside easing targets
+  if(corridor && ambulance){
+    for(const c of cars){
+      if(c.lane===corridor.lane && c.y < ambulance.y - 40 && c.y > ambulance.y - 560){
+        const dir = corridor.lane===0 ? 1 : corridor.lane===LANES-1 ? -1 : (ambulance.lane <= 1 ? 1 : -1);
+        c.pull = dir * LANE_W * 0.42;
+      } else if(!corridor || c.y > ambulance.y){
+        c.pull = 0;
+      }
+    }
+  }
+}
+
+/* ============================================================
+   DETECTION — real algorithms on the (simulated) camera feed
+   ============================================================ */
+// --- flash-pattern detector: downscale → grid → per-cell R-B oscillation ---
+const AC = { w:160, h:200, gx:8, gy:10 };
+const NC = AC.gx * AC.gy;
+const aCanvas = document.createElement('canvas'); aCanvas.width = AC.w; aCanvas.height = AC.h;
+const aCtx = aCanvas.getContext('2d', { willReadFrequently:true });
+const flashCells = [];
+for(let i=0;i<NC;i++) flashCells.push({ hist:new Array(30).fill(0), maxR:0, maxB:0, active:false });
+let flashConfirm = 0, flashPos = null;
+
+function sampleFlash(){
+  const src = (mode==='live' && camReady && camVideo.videoWidth) ? camVideo : cv;
+  aCtx.drawImage(src, 0, 0, AC.w, AC.h);
+  const px = aCtx.getImageData(0,0,AC.w,AC.h).data;
+  const cw = AC.w/AC.gx, ch = AC.h/AC.gy;
+  const sumR = new Float32Array(NC), sumB = new Float32Array(NC), cnt = new Uint16Array(NC);
+  for(let y=0; y<AC.h; y++){
+    const gy = Math.min(AC.gy-1, (y/ch)|0);
+    for(let x=0; x<AC.w; x++){
+      const gx = Math.min(AC.gx-1, (x/cw)|0);
+      const c = gy*AC.gx+gx, o = (y*AC.w+x)*4;
+      sumR[c]+=px[o]; sumB[c]+=px[o+2]; cnt[c]++;
+    }
+  }
+  let active = [];
+  for(let c=0;c<NC;c++){
+    const cell = flashCells[c];
+    const r = sumR[c]/cnt[c], b = sumB[c]/cnt[c];
+    cell.hist.push(r-b); cell.hist.shift();
+    cell.maxR = Math.max(r, cell.maxR*0.965);
+    cell.maxB = Math.max(b, cell.maxB*0.965);
+    let zc=0, peak=0;
+    for(let i=1;i<cell.hist.length;i++){
+      if(cell.hist[i-1]*cell.hist[i] < 0) zc++;
+      const a=Math.abs(cell.hist[i]); if(a>peak) peak=a;
+    }
+    // strobe signature: oscillates ~5Hz AND both colors seen bright AND strong swing
+    cell.active = (zc>=8 && zc<=46 && cell.maxR>110 && cell.maxB>110 && peak>55);
+    if(cell.active) active.push(c);
+  }
+  // cluster centroid → ambulance position estimate
+  if(active.length){
+    let sx=0, sy=0;
+    for(const c of active){ sx += (c%AC.gx+0.5)*cw; sy += (((c/AC.gx)|0)+0.5)*ch; }
+    flashPos = { x: sx/active.length*(W/AC.w), y: sy/active.length*(H/AC.h), n: active.length };
+    flashConfirm = Math.min(5, flashConfirm+1);
+  } else {
+    flashConfirm = Math.max(0, flashConfirm-1);
+    if(flashConfirm===0) flashPos = null;
+  }
+  const conf = Math.min(1, flashConfirm/3) * Math.min(1, active.length/4);
+  setSig('sigFlash', flashConfirm>=2, conf);
+  return flashConfirm>=2;
+}
+
+// --- siren detector: mic/oscillator → FFT → wail-sweep signature ---
+let audioCtx=null, analyser=null, micSrc=null, oscNodes=[];
+const sirenHist = new Array(120).fill(0);
+let sirenOn=false, sirenHold=0;
+
+function ensureAudio(){
+  if(!audioCtx){
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.35;
+  }
+  if(audioCtx.state==='suspended') audioCtx.resume();
+}
+function sampleSiren(){
+  if(!analyser) return;
+  const buf = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteFrequencyData(buf);
+  const binHz = audioCtx.sampleRate/analyser.fftSize;
+  const lo = Math.max(1, Math.floor(400/binHz)), hi = Math.min(buf.length-1, Math.ceil(2000/binHz));
+  let pk=lo, pv=0;
+  for(let i=lo;i<=hi;i++){ if(buf[i]>pv){ pv=buf[i]; pk=i; } }
+  sirenHist.push(pv>42 ? pk*binHz : 0); sirenHist.shift();
+  const valid = sirenHist.filter(f=>f>0);
+  let detected=false, conf=0;
+  if(valid.length>55){
+    const mn=Math.min.apply(null,valid), mx=Math.max.apply(null,valid);
+    const sm = valid.filter((_,i)=>i%3===0);
+    let rev=0, dir=0;
+    for(let i=1;i<sm.length;i++){
+      const d = Math.sign(sm[i]-sm[i-1]);
+      if(d!==0){ if(dir!==0 && d!==dir) rev++; dir=d; }
+    }
+    detected = (mx-mn)>350 && rev>=4;
+    conf = Math.min(1, (mx-mn)/800) * Math.min(1, rev/6);
+    if(detected) sirenHold = 30; // hold 3s so brief gaps don't flicker
+  }
+  if(sirenHold>0){ sirenHold--; detected=true; }
+  if(detected && !sirenOn){ log('🔊 Siren signature detected — early warning, scanning for flash pattern…', 'warn'); }
+  sirenOn = detected;
+  setSig('sigSiren', detected, detected?Math.max(conf,0.55):0);
+  drawSpectrum(buf, binHz);
+}
+function drawSpectrum(buf, binHz){
+  const sc = document.getElementById('spectrum'), g = sc.getContext('2d');
+  g.clearRect(0,0,sc.width,sc.height);
+  const bars=48, bw=sc.width/bars;
+  for(let i=0;i<bars;i++){
+    const idx = Math.floor((i/bars)*buf.length*0.25)+1;
+    const v = buf[idx]/255, h = v*sc.height;
+    const hz = idx*binHz;
+    g.fillStyle = (hz>600&&hz<1700) ? '#ffb020' : '#2a3450';
+    g.fillRect(i*bw+1, sc.height-h, bw-2, h);
+  }
+}
+// simulated siren (test tone through the SAME fft pipeline)
+function playSiren(sec){
+  ensureAudio();
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type='sine'; g.gain.value=0.12;
+  o.connect(g); g.connect(analyser); g.connect(audioCtx.destination);
+  const t0 = audioCtx.currentTime+0.05, cycles = Math.max(1, Math.round(sec/4));
+  for(let i=0;i<cycles;i++){
+    o.frequency.setValueAtTime(700, t0+i*4);
+    o.frequency.linearRampToValueAtTime(1500, t0+i*4+2);
+    o.frequency.linearRampToValueAtTime(700, t0+i*4+4);
+  }
+  o.start(t0); o.stop(t0+cycles*4+0.1);
+  oscNodes.push(o);
+  o.onended = ()=>{ try{o.disconnect();g.disconnect();}catch(e){} };
+}
+async function toggleMic(){
+  ensureAudio();
+  const btn = document.getElementById('btnMic');
+  if(micSrc){
+    micSrc.mediaStream.getTracks().forEach(t=>t.stop());
+    try{micSrc.disconnect();}catch(e){}
+    micSrc=null; btn.textContent='🎤 Mic: OFF';
+    log('Mic off.');
+  } else {
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+      micSrc = audioCtx.createMediaStreamSource(stream);
+      micSrc.mediaStream = stream;
+      micSrc.connect(analyser);
+      btn.textContent='🎤 Mic: ON';
+      log('🎤 Mic live — play a real siren near the phone to test.', 'good');
+    }catch(e){ log('Mic blocked: '+e.message, 'bad'); }
+  }
+}
+
+// --- fusion + lane decision ---
+let fusionState='idle'; // idle | alert | confirmed
+function setSig(id, on, conf){
+  const el = document.getElementById(id);
+  el.classList.toggle('on', !!on);
+  const bar = el.querySelector('.conf i');
+  if(bar) bar.style.width = Math.round((conf||0)*100)+'%';
+}
+function setLED(cls, html){
+  const led = document.getElementById('ledBoard');
+  led.className = 'led '+cls;
+  led.innerHTML = html + '<small>VMS-04 · NH-48</small>';
+}
+function laneScores(){
+  if(!ambulance) return [];
+  const ahead = cars.filter(c=> !c.isAmb && c.y < ambulance.y - 30 && c.y > ambulance.y - 560);
+  return [0,1,2].map(L=>{
+    const n = ahead.filter(c=>c.lane===L).length;
+    return { lane:L, vehicles:n, score: n + 0.4*Math.abs(L-ambulance.lane) };
+  }).sort((a,b)=>a.score-b.score);
+}
+function renderLanes(){
+  const box = document.getElementById('laneRows');
+  if(mode==='live'){
+    box.innerHTML = flashPos
+      ? '<p style="font-size:13px">📍 Beacon estimated at x='+Math.round(flashPos.x)+', y='+Math.round(flashPos.y)+' <span style="color:#8b96ad">('+flashPos.n+' cells)</span></p>'
+      : '<p style="color:#8b96ad;font-size:13px">Live mode — no lane map here; the beacon position appears when detected.</p>';
+    return;
+  }
+  const scores = laneScores();
+  if(!scores.length){ box.innerHTML='<p style="color:#8b96ad;font-size:13px">No ambulance in frame.</p>'; return; }
+  const best = corridor ? corridor.lane : scores[0].lane;
+  box.innerHTML = scores.map(s=>
+    '<div class="lane-row'+(s.lane===best?' chosen':'')+'">'+
+    '<span class="ln">Lane '+(s.lane+1)+'</span>'+
+    '<span class="bar"><i style="width:'+Math.min(100,s.vehicles*22)+'%"></i></span>'+
+    '<span class="meta">'+s.vehicles+' veh · score '+s.score.toFixed(1)+(s.lane===best?' ✓':'')+'</span></div>'
+  ).join('');
+}
+function decideCorridor(){
+  const scores = laneScores();
+  if(!scores.length || !ambulance) return;
+  const best = scores[0];
+  corridor = { lane: best.lane };
+  log('🧠 Corridor decision: <b>LANE '+(best.lane+1)+'</b> — '+best.vehicles+' vehicles to move (score '+best.score.toFixed(1)+').', 'good');
+  setLED('alert', '🚨 AMBULANCE<br>CLEAR LANE '+(best.lane+1));
+  fusionState='confirmed';
+  setSig('sigFusion', true, 1);
+}
+
+/* ---------------- live camera mode ---------------- */
+let mode = 'sim'; // 'sim' | 'live'
+let camReady = false;
+const camVideo = document.getElementById('camVideo');
+
+async function setMode(m){
+  const btn = document.getElementById('btnMode');
+  if(m === 'live'){
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' }, audio:false });
+      camVideo.srcObject = stream;
+      await camVideo.play();
+      mode = 'live'; camReady = true;
+      btn.textContent = '🛣️ Switch to Simulation';
+      document.getElementById('btnAmb').disabled = true;
+      flashCells.forEach(c=>{ c.hist.fill(0); c.maxR=0; c.maxB=0; c.active=false; });
+      flashConfirm = 0; flashPos = null; fusionState = 'idle';
+      setLED('idle', 'CAMERA LIVE<br>WATCHING…');
+      log('🎥 Live camera ON — point at flashing red/blue lights.', 'good');
+      log('Try it: play an ambulance/emergency-lights video on your laptop screen and point the phone at it.', '');
+    }catch(e){
+      log('Camera blocked: '+e.message+' (needs HTTPS + permission)', 'bad');
+    }
+  } else {
+    if(camVideo.srcObject){ camVideo.srcObject.getTracks().forEach(t=>t.stop()); camVideo.srcObject = null; }
+    mode = 'sim'; camReady = false;
+    btn.textContent = '🎥 Switch to Live Camera';
+    document.getElementById('btnAmb').disabled = false;
+    resetSim();
+  }
+}
+
+function drawCameraView(){
+  const vw = camVideo.videoWidth, vh = camVideo.videoHeight;
+  ctx.fillStyle = '#000'; ctx.fillRect(0,0,W,H);
+  if(!vw) return;
+  const s = Math.max(W/vw, H/vh), dw = vw*s, dh = vh*s;
+  ctx.drawImage(camVideo, (W-dw)/2, (H-dh)/2, dw, dh);
+  ctx.strokeStyle = 'rgba(255,255,255,.4)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(W/2, H/2, 26, 0, 7); ctx.stroke();
+  ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(10, 10, 118, 26);
+  ctx.fillStyle = '#ff3b47'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('● LIVE CAM', 20, 28);
+}
+
+/* ---------------- main loop + wiring ---------------- */
+let lastT = performance.now(), detectT = 0, laneT = 0;
+function frame(now){
+  const dt = Math.min(0.05, (now-lastT)/1000); lastT = now;
+  if(mode==='live' && camReady){
+    drawCameraView(); // sim paused — real world is the feed
+  } else {
+    update(dt);
+    drawRoad();
+    const all = cars.concat(ambulance?[ambulance]:[]).sort((a,b)=>b.y-a.y);
+    for(const c of all) drawCar(c);
+  }
+  detectT += dt; laneT += dt;
+  if(detectT >= 0.1){ detectT = 0; sampleFlash(); sampleSiren(); }
+  drawFlashGrid();
+  // fusion: siren = early warning, flash = confirmation
+  const flashYes = flashConfirm>=2;
+  if(mode==='live'){
+    if(flashYes && fusionState!=='confirmed'){
+      fusionState = 'confirmed';
+      setSig('sigFusion', true, 1);
+      setLED('alert', '🚨 AMBULANCE<br>DETECTED — CLEAR ROAD');
+      log('🔴🔵 Flash pattern CONFIRMED on live camera — ambulance detected!', 'bad');
+    } else if(!flashYes && fusionState==='confirmed'){
+      fusionState = 'idle';
+      setSig('sigFusion', false, 0);
+      setLED('idle', 'CAMERA LIVE<br>WATCHING…');
+      log('Signal lost — resuming watch.', '');
+    } else if(sirenOn && fusionState==='idle'){
+      fusionState = 'alert';
+      setSig('sigFusion', true, 0.45);
+      log('Siren heard, no visual yet — tracking…', 'warn');
+    }
+  } else if(ambulance && !corridor){
+    if(flashYes && fusionState!=='confirmed'){
+      log('🔴🔵 Flash pattern CONFIRMED'+(flashPos?' @ lane '+laneOfX(flashPos.x):'')+' — ambulance visually verified.', 'bad');
+      decideCorridor();
+    } else if(sirenOn && fusionState==='idle'){
+      fusionState='alert';
+      setSig('sigFusion', true, 0.45);
+      log('Siren heard, no visual yet — tracking…', 'warn');
+    }
+  }
+  if(laneT >= 0.5){ laneT = 0; renderLanes(); }
+  requestAnimationFrame(frame);
+}
+function laneOfX(x){ return Math.max(0, Math.min(LANES-1, Math.floor(x/LANE_W))); }
+
+document.getElementById('btnMode').addEventListener('click', ()=> setMode(mode==='sim'?'live':'sim'));
+document.getElementById('btnAmb').addEventListener('click', sendAmbulance);
+document.getElementById('btnMic').addEventListener('click', toggleMic);
+document.getElementById('btnSiren').addEventListener('click', ()=>{ playSiren(12); log('🔊 Test siren playing (12s).', 'warn'); });
+document.getElementById('btnReset').addEventListener('click', resetSim);
+document.getElementById('density').addEventListener('input', e=>{
+  density = +e.target.value;
+  log('Traffic density → '+density+'/10');
+});
+document.getElementById('showGrid').addEventListener('change', e=>{ showGrid = e.target.checked; });
+
+// seed + go
+for(let i=0;i<14;i++){ spawnCar(); const c=cars[cars.length-1]; if(c) c.y = Math.random()*H; }
+log('🎥 Camera live — NH-48 KM 212. Press <b>Send Ambulance</b> to run the drill.', 'good');
+log('Tip: the siren fires first (heard before seen), then the flash pattern confirms.', '');
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
